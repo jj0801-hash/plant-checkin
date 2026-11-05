@@ -1,0 +1,69 @@
+/* @AI_GENERATED */
+/* 孩子端与家长端共用的设计变量。取值参考 starbucks-iot-office-web 的移动端样式：
+   星巴克绿主色、白色卡片 + 绿色调柔和投影、12px 圆角、浅灰页面底、Barlow 数字。
+   只定义变量和字体，不写任何选择器规则；变量统一带 --sb- 前缀，避免与页面自己的变量重名。 */
+
+/* Barlow（SIL OFL 1.1，许可文本见 fonts/Barlow-OFL-LICENSE.txt），仅含拉丁字符和数字的子集，约 13KB/字重 */
+@font-face {
+  font-family: 'Barlow'; font-weight: 500; font-style: normal; font-display: swap;
+  src: url('../fonts/barlow-500.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Barlow'; font-weight: 600; font-style: normal; font-display: swap;
+  src: url('../fonts/barlow-600.woff2') format('woff2');
+}
+
+:root {
+  /* 主色 */
+  --sb-green: #01A661;           /* 品牌色：进度条、图标、圆点、描边等不承载文字的地方 */
+  --sb-green-solid: #017F4A;     /* 承载文字的绿：白字绿底（按钮、导航栏）和白底绿字；白色上 5.1:1，页面底上 4.7:1 */
+  --sb-green-dark: #007A51;      /* 渐变起点、按下态、悬浮态 */
+  --sb-green-bright: #00D78E;    /* 渐变终点 */
+  --sb-green-ink: #0C6D53;       /* 绿色底上的深绿文字 */
+  --sb-green-tint: rgba(13, 209, 112, .10);   /* 选中态、在线标签底色 */
+  --sb-green-line: rgba(0, 123, 57, .20);     /* 选中态、在线标签描边 */
+  --sb-gradient: linear-gradient(90deg, #007A51 0%, #00D78E 100%);
+
+  /* 文字灰阶，从深到浅 */
+  --sb-ink: #1C1C1C;
+  --sb-ink-2: #313138;
+  --sb-ink-3: #6E6F7F;           /* 次要文字，白底 4.95:1，页面底 4.55:1 */
+  --sb-ink-4: #8A8B99;           /* 仅用于占位符和禁用态，不放正文 */
+  --sb-ink-5: #A4A5B3;           /* 仅装饰，不承载文字 */
+
+  /* 面与线 */
+  --sb-bg: #F5F5FA;              /* 页面底 */
+  --sb-surface: #FFFFFF;         /* 卡片 */
+  --sb-surface-2: #FCFDFF;       /* 卡片内的次级面 */
+  --sb-line: #F3F3F7;            /* 列表分隔线 */
+  --sb-line-2: #D7D8E0;          /* 输入框、按钮描边 */
+  --sb-fill: rgba(197, 197, 209, .20);        /* 药丸筛选器、灰色标签底 */
+
+  /* 状态：深字 + 浅底 */
+  --sb-red: #D1124B;   --sb-red-bg: #FFEDEF;   --sb-red-dot: #FA465C;
+  --sb-amber: #946200; --sb-amber-bg: #FFF8EB; --sb-amber-dot: #FAA228;
+  --sb-gray-bg: rgba(197, 197, 209, .25);
+
+  /* 孩子端专用：黄色只用于主按钮和星星 */
+  --sb-sun: #FFD83D;
+  --sb-sun-ink: #5A4300;
+
+  /* 圆角与投影 */
+  --sb-r-sm: 4px;      /* 小标签 */
+  --sb-r: 8px;         /* 按钮、输入框 */
+  --sb-r-lg: 12px;     /* 卡片 */
+  --sb-r-pill: 999px;
+  --sb-shadow: 0 2px 12px rgba(1, 117, 74, .10);          /* 卡片 */
+  --sb-shadow-hi: 0 6px 20px rgba(1, 117, 74, .16);       /* 悬浮、弹窗 */
+  --sb-shadow-bar: 0 -2px 12px rgba(1, 117, 74, .08);     /* 底部 Tab 栏 */
+
+  /* 字体：界面文字走系统字体（iPhone 上即苹方），数字用 Barlow */
+  --sb-font: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --sb-font-num: 'Barlow', -apple-system, BlinkMacSystemFont, 'PingFang SC', system-ui, sans-serif;
+
+  /* 间距（8 的倍数 + 一档 4） */
+  --sb-s0: 4px; --sb-s1: 8px; --sb-s2: 16px; --sb-s3: 24px; --sb-s4: 32px;
+  --sb-nav-h: 48px;    /* 顶部绿色导航栏高度 */
+  --sb-tab-h: 56px;    /* 底部 Tab 栏高度（不含安全区） */
+}
+/* @AI_GENERATED: end */
