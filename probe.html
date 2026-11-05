@@ -1,0 +1,251 @@
+<!-- @AI_GENERATED -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src https: http://localhost:* http://127.0.0.1:*; img-src 'self' data:">
+<title>M0 可达性与权限探测</title>
+<style>
+body{font-family:-apple-system,"PingFang SC",sans-serif;background:#eef6e6;margin:0;padding:12px;color:#2d3a1e}
+.c{max-width:760px;margin:0 auto}
+h1{font-size:1.2em;border-left:4px solid #4fae3a;padding-left:8px}
+.box{background:#fff;border-radius:10px;padding:12px;margin:10px 0;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+label{display:block;font-size:.85em;margin:8px 0 2px;color:#555}
+input,select{width:100%;box-sizing:border-box;padding:8px;border:1px solid #ccd5c0;border-radius:6px;font-size:1em}
+button{padding:10px 14px;border:0;border-radius:8px;background:#4fae3a;color:#fff;font-size:1em;margin:6px 6px 0 0}
+button.g{background:#8a96a0}
+table{border-collapse:collapse;width:100%;font-size:.82em}
+th,td{border:1px solid #dfe6d5;padding:5px;text-align:left}
+th{background:#f3f8ec}
+.ok{color:#1b7f2a;font-weight:600}.bad{color:#c0392b;font-weight:600}.skip{color:#888}
+.warn{background:#fff8e1;border-left:4px solid #f5a623;padding:8px;font-size:.85em}
+.row{display:flex;gap:8px}.row>div{flex:1}
+pre{white-space:pre-wrap;word-break:break-all;font-size:.8em;background:#f6f6f6;padding:8px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="c">
+<h1>M0 可达性与权限探测</h1>
+<div class="warn">令牌只保存在本页内存里，默认不写入本机；不会出现在导出的结果中。测试会在私有仓库的 <code>probe/</code> 目录写入再删除临时文件。</div>
+
+<div class="box">
+<b>1. 测试环境（用于汇总）</b>
+<div class="row"><div><label>网络</label><select id="net"><option>家庭 Wi-Fi</option><option>手机移动网络</option><option>其他</option></select></div>
+<div><label>时段</label><select id="period"><option>早</option><option>中</option><option>晚（高峰）</option></select></div></div>
+<label>设备备注（如：iPhone Safari）</label><input id="device" placeholder="可不填">
+</div>
+
+<div class="box">
+<b>2. 仓库与令牌</b>
+<label>API 地址（默认 GitHub；仅在本地模拟测试时修改）</label><input id="api" value="https://api.github.com">
+<label>GitHub 用户名</label><input id="owner" autocomplete="off">
+<div class="row"><div><label>孩子数据仓库名</label><input id="repoKid" value="plant-checkin-data-kid"></div>
+<div><label>家长数据仓库名</label><input id="repoParent" value="plant-checkin-data-parent"></div></div>
+<label>K-write（孩子写令牌）</label><input id="kw" type="password" autocomplete="off">
+<label>K-read（孩子读令牌）</label><input id="kr" type="password" autocomplete="off">
+<label>P-token（家长令牌）</label><input id="p" type="password" autocomplete="off">
+<label><input id="remember" type="checkbox" style="width:auto"> 记住令牌到本机浏览器（仅限自己的设备；测试完成后请清除）</label>
+<label>可选：Supabase 项目地址（如 https://xxxx.supabase.co）</label><input id="sb" placeholder="可不填">
+<label>每个测试重复次数</label><input id="rounds" type="number" min="1" max="20" value="5">
+<button id="run">开始测试</button><button id="clear" class="g">清除令牌</button>
+</div>
+
+<div class="box"><b>3. 结果</b><div id="status">尚未运行</div><div id="summary"></div><div style="overflow-x:auto"><table id="tbl"></table></div>
+<button id="save">保存本次到历史</button><button id="export" class="g">导出历史 JSON</button><button id="wipe" class="g">清空历史</button></div>
+<div class="box"><b>4. 历史汇总（跨时段、跨网络）</b><div style="overflow-x:auto"><table id="hist"></table></div></div>
+</div>
+
+<script>
+// ===== 核心逻辑（不依赖 DOM，可在 Node 中测试）=====
+var DEFAULT_API = 'https://api.github.com';
+var API = DEFAULT_API;
+var TIMEOUT_MS = 10000;
+var THRESH = { successRate: 0.95, readP95: 3000, writeP95: 5000 };
+
+function p95(a) {
+  if (!a.length) return null;
+  var s = a.slice().sort(function (x, y) { return x - y; });
+  return s[Math.min(s.length - 1, Math.ceil(s.length * 0.95) - 1)];
+}
+function b64(s) { return btoa(unescape(encodeURIComponent(s))); }
+function hdr(tok) {
+  return { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28',
+           'Authorization': 'Bearer ' + tok };
+}
+async function timed(url, opt) {
+  var c = new AbortController();
+  var t = setTimeout(function () { c.abort(); }, TIMEOUT_MS);
+  var t0 = performance.now();
+  try {
+    var o = Object.assign({}, opt || {}, { signal: c.signal });
+    var r = await fetch(url, o);
+    var ms = performance.now() - t0, body = null;
+    try { body = await r.json(); } catch (e) { body = null; }
+    return { status: r.status, ms: ms, body: body };
+  } catch (e) {
+    return { status: 0, ms: performance.now() - t0, error: e && e.name === 'AbortError' ? '超时' : '网络错误' };
+  } finally { clearTimeout(t); }
+}
+async function ghRead(owner, repo, tok) {
+  return timed(API + '/repos/' + owner + '/' + repo + '/contents/', { headers: hdr(tok) });
+}
+async function ghWrite(owner, repo, tok, tag) {
+  var path = 'probe/' + Date.now() + '-' + tag + '.txt';
+  var h = Object.assign({ 'Content-Type': 'application/json' }, hdr(tok));
+  var r = await timed(API + '/repos/' + owner + '/' + repo + '/contents/' + path,
+    { method: 'PUT', headers: h, body: JSON.stringify({ message: 'probe write', content: b64('probe ' + new Date().toISOString()) }) });
+  r.path = path;
+  return r;
+}
+async function ghCleanup(owner, repo, tok, r) {
+  if (r.status === 201 && r.body && r.body.content && r.body.content.sha) {
+    var h = Object.assign({ 'Content-Type': 'application/json' }, hdr(tok));
+    await timed(API + '/repos/' + owner + '/' + repo + '/contents/' + r.path,
+      { method: 'DELETE', headers: h, body: JSON.stringify({ message: 'probe cleanup', sha: r.body.content.sha }) });
+  }
+}
+var MATRIX = [
+  { id: 'KW1', label: '孩子写令牌 写 data-kid', tok: 'kw', repo: 'kid', op: 'write', expect: 'ok' },
+  { id: 'KW2', label: '孩子写令牌 写 data-parent', tok: 'kw', repo: 'parent', op: 'write', expect: 'deny' },
+  { id: 'KW3', label: '孩子写令牌 读 data-parent', tok: 'kw', repo: 'parent', op: 'read', expect: 'deny' },
+  { id: 'KR1', label: '孩子读令牌 读 data-parent', tok: 'kr', repo: 'parent', op: 'read', expect: 'ok' },
+  { id: 'KR2', label: '孩子读令牌 写 data-parent', tok: 'kr', repo: 'parent', op: 'write', expect: 'deny' },
+  { id: 'KR3', label: '孩子读令牌 写 data-kid', tok: 'kr', repo: 'kid', op: 'write', expect: 'deny' },
+  { id: 'KR4', label: '孩子读令牌 读 data-kid', tok: 'kr', repo: 'kid', op: 'read', expect: 'deny' },
+  { id: 'P1', label: '家长令牌 读 data-kid', tok: 'p', repo: 'kid', op: 'read', expect: 'ok' },
+  { id: 'P2', label: '家长令牌 写 data-kid', tok: 'p', repo: 'kid', op: 'write', expect: 'ok' },
+  { id: 'P3', label: '家长令牌 读 data-parent', tok: 'p', repo: 'parent', op: 'read', expect: 'ok' },
+  { id: 'P4', label: '家长令牌 写 data-parent', tok: 'p', repo: 'parent', op: 'write', expect: 'ok' }
+];
+// 判定：返回 {pass, note}
+function judge(expect, op, r) {
+  if (r.status === 0) return { pass: false, note: r.error || '网络错误' };
+  if (r.status === 401) return { pass: false, note: '令牌无效或已过期(401)' };
+  if (expect === 'ok') {
+    var good = op === 'write' ? 201 : 200;
+    if (r.status === good) return { pass: true, note: '' };
+    if (r.status === 404) return { pass: false, note: '404：仓库名/用户名不对，或仓库为空（需要先创建 README）' };
+    return { pass: false, note: '状态码 ' + r.status };
+  }
+  if (r.status === 403 || r.status === 404) return { pass: true, note: '已被拒绝（符合预期）' };
+  return { pass: false, note: '本应被拒绝，却返回 ' + r.status + '（权限隔离失效！）' };
+}
+async function runSuite(cfg, rounds, onProgress) {
+  var rows = [];
+  API = (cfg.api || DEFAULT_API).replace(/\/+$/, '');
+  var customApi = API !== DEFAULT_API;
+  var repos = { kid: cfg.repoKid, parent: cfg.repoParent };
+  for (var n = 1; n <= rounds; n++) {
+    // 无令牌的基础可达性
+    var rl = await timed(API + '/rate_limit', {});
+    rows.push({ round: n, id: 'API', label: 'API 根地址（无令牌，跨域）', op: 'read', expect: 'ok',
+                status: rl.status, ms: rl.ms, pass: rl.status === 200, note: rl.error || (rl.status === 200 ? '' : '状态码 ' + rl.status) });
+    for (var i = 0; i < MATRIX.length; i++) {
+      var m = MATRIX[i], tok = cfg[m.tok];
+      if (!tok) { rows.push({ round: n, id: m.id, label: m.label, op: m.op, expect: m.expect, skipped: true }); continue; }
+      var r = m.op === 'read' ? await ghRead(cfg.owner, repos[m.repo], tok) : await ghWrite(cfg.owner, repos[m.repo], tok, m.id);
+      var j = judge(m.expect, m.op, r);
+      rows.push({ round: n, id: m.id, label: m.label, op: m.op, expect: m.expect, status: r.status, ms: r.ms, pass: j.pass, note: j.note });
+      if (m.op === 'write' && m.expect === 'ok') await ghCleanup(cfg.owner, repos[m.repo], tok, r);
+      if (onProgress) onProgress(rows.length);
+    }
+    var self = await timed(cfg.selfUrl || 'about:blank', {});
+    if (cfg.selfUrl) rows.push({ round: n, id: 'SELF', label: '本页所在站点（同源请求）', op: 'read', expect: 'ok',
+                                 status: self.status, ms: self.ms, pass: self.status === 200, note: self.error || '' });
+    var reach = customApi ? [] : [['https://github.com/', 'github.com'], ['https://gitee.com/', 'gitee.com']];
+    if (cfg.sb && !customApi) reach.push([cfg.sb, 'Supabase']);
+    for (var k = 0; k < reach.length; k++) {
+      var t0 = performance.now(), okk = true, err = '';
+      try { await fetch(reach[k][0], { mode: 'no-cors', signal: AbortSignal.timeout ? AbortSignal.timeout(TIMEOUT_MS) : undefined }); }
+      catch (e) { okk = false; err = '无法连接'; }
+      rows.push({ round: n, id: 'R' + k, label: '可达性：' + reach[k][1], op: 'reach', expect: 'ok',
+                  status: okk ? 'ok' : 0, ms: performance.now() - t0, pass: okk, note: err, reach: true });
+    }
+  }
+  return rows;
+}
+function summarize(rows) {
+  var run = rows.filter(function (r) { return !r.skipped; });
+  var pass = run.filter(function (r) { return r.pass; }).length;
+  var reads = run.filter(function (r) { return r.expect === 'ok' && r.op === 'read' && r.pass; }).map(function (r) { return r.ms; });
+  var writes = run.filter(function (r) { return r.expect === 'ok' && r.op === 'write' && r.pass; }).map(function (r) { return r.ms; });
+  // 隔离失效：本应被拒绝的操作却成功了（200/201）；网络错误、401 不算
+  var denyFail = run.filter(function (r) { return r.expect === 'deny' && (r.status === 200 || r.status === 201); }).length;
+  var s = { total: run.length, pass: pass, successRate: run.length ? pass / run.length : 0,
+            readP95: p95(reads), writeP95: p95(writes), isolationBroken: denyFail };
+  s.okRate = s.successRate >= THRESH.successRate;
+  s.okRead = s.readP95 !== null && s.readP95 <= THRESH.readP95;
+  s.okWrite = s.writeP95 !== null && s.writeP95 <= THRESH.writeP95;
+  s.verdict = s.okRate && s.okRead && s.okWrite && denyFail === 0;
+  return s;
+}
+
+// ===== 界面（仅浏览器）=====
+if (typeof document !== 'undefined') {
+  var $ = function (id) { return document.getElementById(id); };
+  var HKEY = 'probe_history_v1', TKEY = 'probe_tokens_v1', last = null;
+  function cfgFromUi() {
+    return { api: $('api').value.trim(), owner: $('owner').value.trim(), repoKid: $('repoKid').value.trim(), repoParent: $('repoParent').value.trim(),
+             kw: $('kw').value.trim(), kr: $('kr').value.trim(), p: $('p').value.trim(), sb: $('sb').value.trim(),
+             selfUrl: location.protocol.indexOf('http') === 0 ? location.href.split('#')[0] : '' };
+  }
+  function cell(tr, text, cls) { var td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.appendChild(td); }
+  function renderRows(rows) {
+    var t = $('tbl'); t.textContent = '';
+    var h = document.createElement('tr'); ['#', '测试', '预期', '状态', '耗时ms', '结果', '说明'].forEach(function (x) { var th = document.createElement('th'); th.textContent = x; h.appendChild(th); }); t.appendChild(h);
+    rows.forEach(function (r) {
+      var tr = document.createElement('tr');
+      cell(tr, r.round); cell(tr, r.label); cell(tr, r.expect === 'deny' ? '应拒绝' : '应成功');
+      if (r.skipped) { cell(tr, '-'); cell(tr, '-'); cell(tr, '未填令牌，跳过', 'skip'); cell(tr, ''); }
+      else { cell(tr, r.status); cell(tr, Math.round(r.ms)); cell(tr, r.pass ? '通过' : '失败', r.pass ? 'ok' : 'bad'); cell(tr, r.note); }
+      t.appendChild(tr);
+    });
+  }
+  function renderSummary(s) {
+    var f = function (v) { return v === null ? '无数据' : Math.round(v) + ' ms'; };
+    var d = $('summary'); d.textContent = '';
+    var pre = document.createElement('pre');
+    pre.textContent = '成功率 ' + (s.successRate * 100).toFixed(1) + '%（' + s.pass + '/' + s.total + '） 标准 ≥95%：' + (s.okRate ? '通过' : '未通过') + '\n' +
+      '读取 P95 ' + f(s.readP95) + ' 标准 ≤3000 ms：' + (s.okRead ? '通过' : '未通过') + '\n' +
+      '写入 P95 ' + f(s.writeP95) + ' 标准 ≤5000 ms：' + (s.okWrite ? '通过' : '未通过') + '\n' +
+      '权限隔离失效数 ' + s.isolationBroken + '（必须为 0）\n' +
+      '本次结论：' + (s.verdict ? '通过' : '未通过') + '（需连续 3 天、两种网络、早中晚都通过才算最终通过）';
+    d.appendChild(pre);
+  }
+  function loadHist() { try { return JSON.parse(localStorage.getItem(HKEY) || '[]'); } catch (e) { return []; } }
+  function renderHist() {
+    var t = $('hist'); t.textContent = '';
+    var h = document.createElement('tr'); ['时间', '网络', '时段', '设备', '成功率', '读P95', '写P95', '隔离', '结论'].forEach(function (x) { var th = document.createElement('th'); th.textContent = x; h.appendChild(th); }); t.appendChild(h);
+    loadHist().forEach(function (e) {
+      var tr = document.createElement('tr');
+      [e.time, e.net, e.period, e.device, (e.summary.successRate * 100).toFixed(1) + '%', e.summary.readP95 === null ? '-' : Math.round(e.summary.readP95), e.summary.writeP95 === null ? '-' : Math.round(e.summary.writeP95), e.summary.isolationBroken === 0 ? '正常' : '失效'].forEach(function (x) { cell(tr, x); });
+      cell(tr, e.summary.verdict ? '通过' : '未通过', e.summary.verdict ? 'ok' : 'bad'); t.appendChild(tr);
+    });
+  }
+  $('run').onclick = async function () {
+    var cfg = cfgFromUi();
+    if (!cfg.owner) { alert('请填写 GitHub 用户名'); return; }
+    if ($('remember').checked) localStorage.setItem(TKEY, JSON.stringify({ kw: cfg.kw, kr: cfg.kr, p: cfg.p, owner: cfg.owner }));
+    $('run').disabled = true; $('status').textContent = '测试中，请稍候……';
+    var rounds = Math.max(1, Math.min(20, parseInt($('rounds').value, 10) || 5));
+    var rows = await runSuite(cfg, rounds, function (n) { $('status').textContent = '已完成 ' + n + ' 项……'; });
+    var s = summarize(rows); renderRows(rows); renderSummary(s);
+    last = { time: new Date().toLocaleString(), net: $('net').value, period: $('period').value, device: $('device').value || navigator.userAgent.slice(0, 60), summary: s };
+    $('status').textContent = '测试完成'; $('run').disabled = false;
+  };
+  $('save').onclick = function () { if (!last) return; var h = loadHist(); h.push(last); localStorage.setItem(HKEY, JSON.stringify(h)); renderHist(); };
+  $('wipe').onclick = function () { if (confirm('清空历史记录？')) { localStorage.removeItem(HKEY); renderHist(); } };
+  $('clear').onclick = function () { ['kw', 'kr', 'p'].forEach(function (k) { $(k).value = ''; }); localStorage.removeItem(TKEY); };
+  $('export').onclick = function () {
+    var blob = new Blob([JSON.stringify(loadHist(), null, 2)], { type: 'application/json' });
+    var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'probe-history.json'; a.click();
+  };
+  try { var sv = JSON.parse(localStorage.getItem(TKEY) || 'null'); if (sv) { $('kw').value = sv.kw || ''; $('kr').value = sv.kr || ''; $('p').value = sv.p || ''; $('owner').value = sv.owner || ''; $('remember').checked = true; } } catch (e) {}
+  renderHist();
+}
+if (typeof module !== 'undefined') { module.exports = { runSuite: runSuite, summarize: summarize, judge: judge, p95: p95, MATRIX: MATRIX }; }
+</script>
+</body>
+</html>
+<!-- @AI_GENERATED: end -->
