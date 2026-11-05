@@ -1,0 +1,25 @@
+{
+  "name": "通关打卡",
+  "short_name": "通关打卡",
+  "lang": "zh-CN",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F5F5FA",
+  "theme_color": "#017F4A",
+  "icons": [
+    {
+      "src": "icons/kid-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/kid-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
